@@ -15,7 +15,8 @@ enrich.py              research pipeline: input.csv -> output.jsonl
 export.py              output.jsonl -> output.csv
 export_sheet.py        output.jsonl -> report.xlsx (needs openpyxl)
 prompt_template.md     the research prompt; three context files are pasted into it
-repair_prompt.md       the no-tools prompt used to fix format errors
+repair_prompt.md       the no-tools prompt used to fix format errors (automatic)
+refresh_prompt.md      the web-only prompt used by --refresh to update existing records
 context/
   fit_rubric.md        how fit is judged and scored (pasted into the prompt)
   example.md           one gold-standard output (pasted into the prompt)
@@ -45,25 +46,28 @@ CLAUDE.md              instructions for Claude Code sessions that maintain this 
 
 ## Running
 
+The whole flow is three steps: `input.csv` → `enrich.py` → `export_sheet.py`.
+
 1. Prepare `input.csv` with columns `name,website,category,source_list` (see
    `input.example.csv`). `website` may be left empty; the model then finds it.
    `source_list` is `existing` or `new`; `new` rows also get a Chinese "why selected"
    note. `category` is free text that is echoed into the output.
-2. Run the research, three companies at a time:
+2. Run the research:
    ```
    python3 enrich.py --workers 3
    ```
-   One status line per company shows fit_score, seconds, the 5-hour window reset time,
-   and tags: `norm:` (a format variant fixed locally), `repaired:` (fixed by a cheap
-   no-tools call), `rerun`, and `WARN:` (a reported ARR whose source is neither the
-   company nor a listed outlet; review it). Expect roughly three minutes and about $0.7
-   of notional usage per company; 41 companies ran in 33 minutes with three workers.
-3. Export:
+   One call per company, three in parallel. Format slips are fixed automatically: a
+   local normalization first, then a cheap no-tools repair call, then at most one rerun.
+   You only see them as tags on the status line, `norm:`, `repaired:` and `rerun`, plus
+   `WARN:` for a reported ARR whose source is neither the company nor a listed outlet.
+   Expect roughly three minutes and about $0.7 of notional usage per company; 41
+   companies ran in 33 minutes with three workers.
+3. Build the report and upload it:
    ```
-   python3 export.py                    # output.csv, UTF-8 with BOM
-   .venv/bin/python export_sheet.py     # report.xlsx
+   .venv/bin/python export_sheet.py
    ```
-4. Upload `report.xlsx` to Google Drive, open it, then File → Save as Google Sheets.
+   Upload `report.xlsx` to Google Drive, open it, then File → Save as Google Sheets.
+   `python3 export.py` writes a plain `output.csv` (UTF-8 with BOM) if you need one.
 
 ### Re-running one company, resuming, errors
 
@@ -72,18 +76,15 @@ CLAUDE.md              instructions for Claude Code sessions that maintain this 
 - Resume is automatic. Companies already in `output.jsonl` are skipped, so running the
   same command again after a stop, a crash, or a usage-limit exit continues where it
   left off. `--limit N` runs only the first N remaining rows.
-- `python3 enrich.py --refresh proof-points --workers 3` updates only the proof-point
-  wording of existing records (fit_zh, pitch_en, evidence_urls) after the proof-point
-  rule changes; one web search per record via `update_prompt.md`, drive9-target rows
-  skipped, changes logged as `updated:` in `errors.log`. Add `--only` names to limit it.
 - Usage limits are not failures. On a hit, all workers pause until the reset time the
   CLI reports (30 minutes if it reports none), then retry the same company. After four
   waits, or on a weekly limit, the run exits cleanly; rerun it later.
 - `errors.log` has one entry per event under a header line
   `===== <timestamp>  <company>  <marker> =====`. Markers: `FAILED` (the company was
   not written; the raw model text is included), `recovered: rerun`,
-  `recovered: repair <fields>` (with the patch), and `recovered: patch <fields>` (a
-  deterministic fix applied to a stored record).
+  `recovered: repair <fields>` (with the patch), `recovered: patch <fields>` (a
+  deterministic fix applied to a stored record), and `refreshed: <kind> <fields>` (see
+  "Changing rules after a run").
 
 ## Updating the prompt
 
@@ -94,6 +95,7 @@ CLAUDE.md              instructions for Claude Code sessions that maintain this 
 | a field's meaning, allowed values, or format | `context/output_schema.json`, plus the matching check in `enrich.py` (`validate()` / `normalize()`) |
 | role, product facts, proof points, hard rules, research procedure | `prompt_template.md` |
 | how format errors are repaired | `repair_prompt.md` |
+| how `--refresh` rewrites existing records | `refresh_prompt.md` |
 
 `context/example.md` is pasted into the prompt with "copy this tone and depth exactly".
 When the example and a rule disagree, the model follows the example, so every rule
@@ -101,6 +103,36 @@ change must be mirrored in the example. Keep the four `{{company}}`-style variab
 the very end of the template so prompt caching keeps working across companies. Do not
 add instructions inside `enrich.py`; the prompt is exactly the template with the three
 files pasted in.
+
+## Changing rules after a run
+
+`--refresh` is an optional maintenance path for when a rule changes after records
+already exist and only their prose needs to follow. It never re-researches a company.
+
+- **When to use it:** a change that affects wording only, such as the proof-point rule.
+  Do not use it for changes to the rubric, to a field's meaning in the schema, or to
+  anything that could move a score; those need a full re-run of the affected rows with
+  `--only`, or of everything.
+- **What it does:** one web-only call per existing record, built from
+  `refresh_prompt.md`, which may return a patch for a fixed set of fields. For the
+  `proof-points` kind that set is `fit_zh`, `pitch_en` and `evidence_urls`, and
+  drive9-target rows are skipped because the only drive9 customer story is already a
+  lead proof point. A patch that touches any other field is rejected and the record is
+  left as it was. Rows the model finds nothing for come back as `no match`, untouched.
+- **What never moves:** `fit_score`, and every fact field (funding, ARR, stack signals).
+  The refresh rewrites prose around a new citation; it does not re-verify facts.
+- **Cost:** about $0.13 of notional usage and 15 to 120 seconds per row, against about
+  $0.7 and three minutes for a full re-run.
+- **Running it:**
+  ```
+  python3 enrich.py --refresh proof-points --workers 3                 # all eligible records
+  python3 enrich.py --refresh proof-points --only "Writer" --only "Lindy"
+  ```
+  Changed rows are logged in `errors.log` under `refreshed: <kind> <fields>` with the
+  before and after text. In the first batch, 12 of 59 eligible rows changed.
+- **Adding a kind:** add an entry to `REFRESH_FIELDS` (and to `REFRESH_SKIP` if some
+  rows cannot benefit) in `enrich.py`; `refresh_prompt.md` is written for proof points
+  today and would need its own instructions for a new kind.
 
 ## Known limits
 

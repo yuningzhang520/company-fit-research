@@ -22,6 +22,7 @@ a fifth wait in one run, stops the run cleanly; rerunning resumes.
     python3 enrich.py                        # all remaining rows, one at a time
     python3 enrich.py --workers 3 --limit 10 # first 10 remaining rows, 3 in parallel
     python3 enrich.py --only "Cursor"        # re-run one company, overwrite its line
+    python3 enrich.py --refresh proof-points --workers 3  # after a rule change: update prose of existing records
 """
 import argparse
 import copy
@@ -44,7 +45,7 @@ OUTPUT_JSONL = ROOT / "output.jsonl"
 ERRORS_LOG = ROOT / "errors.log"
 TEMPLATE = ROOT / "prompt_template.md"
 REPAIR_TEMPLATE = ROOT / "repair_prompt.md"
-UPDATE_TEMPLATE = ROOT / "update_prompt.md"
+REFRESH_TEMPLATE = ROOT / "refresh_prompt.md"
 CONTEXT = ROOT / "context"
 SCHEMA = CONTEXT / "output_schema.json"
 
@@ -152,10 +153,10 @@ def expand_repair_template():
     return text.replace(SCHEMA_PLACEHOLDER, SCHEMA.read_text(encoding="utf-8"))
 
 
-def expand_update_template():
-    """Update prompt with the research prompt's product/proof-point/rules block and the schema
+def expand_refresh_template():
+    """Refresh prompt with the research prompt's product/proof-point/rules block and the schema
     pasted in; {{company}} and {{record}} stay for later."""
-    text = UPDATE_TEMPLATE.read_text(encoding="utf-8")
+    text = REFRESH_TEMPLATE.read_text(encoding="utf-8")
     research = TEMPLATE.read_text(encoding="utf-8")
     start, end = research.find("# What we sell"), research.find("# Fit rubric")
     if start == -1 or end == -1 or end <= start:
@@ -163,7 +164,7 @@ def expand_update_template():
     for placeholder, content in (("{{paste template: what we sell}}", research[start:end].strip()),
                                  (SCHEMA_PLACEHOLDER, SCHEMA.read_text(encoding="utf-8"))):
         if placeholder not in text:
-            sys.exit(f"placeholder {placeholder!r} not found in update_prompt.md")
+            sys.exit(f"placeholder {placeholder!r} not found in refresh_prompt.md")
         text = text.replace(placeholder, content)
     return text
 
@@ -695,14 +696,14 @@ def research(row, prompt, repair_template, schema_keys, state):
     return None, cost, "\n\n".join(errors), None
 
 
-def refresh_record(row, record, kind, update_template, schema_keys, state):
+def refresh_record(row, record, kind, refresh_template, schema_keys, state):
     """--refresh: one web-enabled call that may patch only REFRESH_FIELDS[kind] of an existing record.
 
     Returns (record, cost, None, info) on success (record unchanged when the model returns {}),
     or (None, cost, error_text, None). Raises UsageLimit like research().
     """
     fields = REFRESH_FIELDS[kind]
-    prompt = (update_template
+    prompt = (refresh_template
               .replace("{{company}}", row["name"])
               .replace("{{record}}", json.dumps(record, ensure_ascii=False, indent=2)))
     text, session, cost, cli_err = call(refresh_cmd(), prompt, REFRESH_TIMEOUT_SEC, state, "refresh call")
@@ -714,7 +715,7 @@ def refresh_record(row, record, kind, update_template, schema_keys, state):
         return None, cost, f"refresh output is not JSON: {e} (session {session})\n{text}", None
     if not isinstance(patch, dict):
         return None, cost, f"refresh output is not an object (session {session})\n{text}", None
-    info = {"attempt": 1, "normalized": [], "repaired": [], "updated": [], "no_match": False}
+    info = {"attempt": 1, "normalized": [], "repaired": [], "refreshed": [], "no_match": False}
     if not patch:
         info["no_match"] = True
         return record, cost, None, info
@@ -739,8 +740,8 @@ def refresh_record(row, record, kind, update_template, schema_keys, state):
     before = "\n".join(f"{f}: {json.dumps(record.get(f), ensure_ascii=False)}" for f in changed)
     after = "\n".join(f"{f}: {json.dumps(obj.get(f), ensure_ascii=False)}" for f in changed)
     log_error(row["name"], f"(session {session})\n--- before ---\n{before}\n--- after ---\n{after}",
-              marker=f"updated: {kind} " + ",".join(changed))
-    info["updated"] = changed
+              marker=f"refreshed: {kind} " + ",".join(changed))
+    info["refreshed"] = changed
     return obj, cost, None, info
 
 
@@ -788,8 +789,8 @@ def status_tags(info, warns):
         tags.append("repaired: " + ",".join(info["repaired"]))
     if info["attempt"] > 1:
         tags.append("rerun")
-    if info.get("updated"):
-        tags.append("updated: " + ",".join(info["updated"]))
+    if info.get("refreshed"):
+        tags.append("refreshed: " + ",".join(info["refreshed"]))
     if info.get("no_match"):
         tags.append("no match")
     if warns:
@@ -803,7 +804,7 @@ class Ctx:
     """Read-only inputs shared by workers, plus the records list for --only (replace mode)."""
 
     def __init__(self, template, repair_template, schema_keys, total, replace=False, records=None,
-                 refresh=None, update_template=None):
+                 refresh=None, refresh_template=None):
         self.template = template
         self.repair_template = repair_template
         self.schema_keys = schema_keys
@@ -811,7 +812,7 @@ class Ctx:
         self.replace = replace
         self.records = records or []
         self.refresh = refresh                  # None, or a REFRESH_FIELDS kind
-        self.update_template = update_template
+        self.refresh_template = refresh_template
 
     def record_for(self, row):
         return next((r for r in self.records if r.get("company") == row["name"]), None)
@@ -878,7 +879,7 @@ def worker(wid, state, todo, ctx):
             if ctx.refresh:
                 with state.lock:
                     current = ctx.record_for(row)
-                obj, cost, err, info = refresh_record(row, current, ctx.refresh, ctx.update_template, ctx.schema_keys, state)
+                obj, cost, err, info = refresh_record(row, current, ctx.refresh, ctx.refresh_template, ctx.schema_keys, state)
             else:
                 obj, cost, err, info = research(row, ctx.prompt_for(row), ctx.repair_template, ctx.schema_keys, state)
         except UsageLimit as hit:
@@ -995,7 +996,7 @@ def main():
           f"{min(n_workers, max(len(todo), 1))} worker(s)", flush=True)
     ctx = Ctx(expand_template(), expand_repair_template(), schema_keys, len(todo),
               replace=bool(args.only or args.refresh), records=records,
-              refresh=args.refresh, update_template=expand_update_template() if args.refresh else None)
+              refresh=args.refresh, refresh_template=expand_refresh_template() if args.refresh else None)
     state = RunState()
 
     t_start = time.monotonic()

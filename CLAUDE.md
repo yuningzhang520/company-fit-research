@@ -25,8 +25,9 @@ with placeholders expanded; the script never adds instructions of its own.
   --setting-sources user`, prompt on stdin. `--setting-sources user` keeps this file
   out of the research context; do not remove it.
   `--refresh proof-points` (with `--only` names or all records) runs one web-only call
-  per existing record from `update_prompt.md` that may patch only fit_zh / pitch_en /
-  evidence_urls; drive9-target rows are skipped; changes are logged as `updated:`.
+  per existing record from `refresh_prompt.md` that may patch only fit_zh / pitch_en /
+  evidence_urls; fit_score never moves; drive9-target rows are skipped; changes are
+  logged as `refreshed:`.
 - `export.py` — `output.jsonl` → `output.csv` (UTF-8 BOM, schema key order, rows in
   `input.csv` order).
 - `export_sheet.py` — `output.jsonl` → `report.xlsx` (README, 原有/新增 sheets,
@@ -39,7 +40,7 @@ with placeholders expanded; the script never adds instructions of its own.
   or `prompt_template.md` unless the user explicitly authorizes that specific change.
   Propose it and wait. When authorized: back up first, exact-match replace, keep schema
   keys and their order unchanged, show a diff.
-- The scripts and `repair_prompt.md` may be maintained without authorization; say what
+- The scripts, `repair_prompt.md` and `refresh_prompt.md` may be maintained without authorization; say what
   changed and why.
 - `context/example.md` is pasted as "copy this exactly" and wins over the rules when
   they conflict, so every rule change must also be reflected in the example.
