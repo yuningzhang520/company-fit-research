@@ -60,7 +60,7 @@ The whole flow is three steps: `input.csv` → `enrich.py` → `export_sheet.py`
    local normalization first, then a cheap no-tools repair call, then at most one rerun.
    You only see them as tags on the status line, `norm:`, `repaired:` and `rerun`, plus
    `WARN:` for a reported ARR whose source is neither the company nor a listed outlet.
-   Expect roughly three minutes and about $0.7 of notional usage per company; 41
+   Expect roughly three minutes and about $0.7 of notional usage per company (subscription usage, not billed); 41
    companies ran in 33 minutes with three workers.
 3. Build the report and upload it:
    ```
