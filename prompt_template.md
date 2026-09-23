@@ -25,11 +25,16 @@ Scoped tokens give each sandbox only the paths and permissions it needs. It moun
 into E2B, Firecracker, Docker, cloud VMs, or local machines. This is the company's
 lead product right now.
 
-**Approved proof points** — cite only these, exactly as stated:
+**Proof points** — lead with these four, quoted exactly as stated:
 - Manus: close to a million database tenants on TiDB; migrated from MySQL.
 - Atlassian Forge: hundreds of Postgres instances consolidated to ~16 TiDB clusters (Forge platform only).
 - Kimi Projects: 100k+ filesystems on drive9.
 - Pinterest: PinGraph on TiDB, replaced HBase.
+You may cite one additional customer reference only if it is published on pingcap.com,
+docs.pingcap.com, drive9.ai or sys9.ai (customer stories, press releases, blog). Quote the
+figure exactly as the page states it, add the page URL to evidence_urls, and spend at most
+one search (e.g. `site:pingcap.com/customers <industry>`) finding it. Never cite a PingCAP
+customer from a third-party article.
 
 **Rules**
 - E2B, Runloop, Daytona and similar sandbox providers are partners and mount targets.
@@ -37,7 +42,7 @@ lead product right now.
 - Never assert a TiDB or drive9 capability that reference material does not confirm.
   List it in `needs_confirmation` and phrase it as "likely" in prose.
 - intro_zh, fit_zh and pitch_en must not contain funding, valuation, or revenue figures —
-  the company's or anyone else's. Approved proof-point scale figures (tenant counts,
+  the company's or anyone else's. Proof-point scale figures (tenant counts,
   filesystem counts) are allowed. Acquisitions may be mentioned without the price.
 
 # Fit rubric
