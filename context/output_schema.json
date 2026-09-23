@@ -1,0 +1,34 @@
+{
+  "company": "string — as given in input",
+  "website": "string — as given in input",
+  "category": "string — as given in input",
+  "source_list": "existing | new — as given in input",
+
+  "relationship_type": "direct | partner | both — per fit_rubric.md Step 1",
+  "integration_surface": "English, 1 line. How we would actually plug in for a partner: e.g. 'default DB option for user apps', 'mount into their sandbox', 'framework storage adapter', 'marketplace listing'. 'n/a' if relationship_type = direct.",
+
+  "intro_zh": "中文大白话，2–3 句。这家公司做什么、给谁用、产品怎么跑。产品名和技术词保留英文。",
+  "fit_headline_zh": "中文，一句话不超过 20 字，概括契合点。会放进表格列里。",
+  "fit_zh": "中文大白话，3–6 句。第一句说清是直接用、合作、还是两者都有。然后分别说 TiDB 这边和 drive9 这边（哪边弱就少说或不说）。必须点出具体 workload 模式；partner 的话说的是他们用户的 workload。能引 approved proof point 就引。有摩擦（比如用 Postgres、已绑定竞品）要写出来。推测的地方用「可能」「大概」标出。",
+  "fit_target": "TiDB | drive9 | both | weak",
+  "fit_score": "integer 1–5 per fit_rubric.md",
+
+  "pitch_en": "English, 70–110 words, engineer-to-engineer. Lead with the stronger side (TiDB or drive9). For partner, address how their users benefit and what the integration looks like. Use product vocabulary from reference material. No marketing adjectives. Never frame drive9 as competing with sandbox providers.",
+
+  "why_selected_zh": "中文，2–3 句。仅当 source_list = new 时填写：为什么这家值得进 list（规模、融资、和 category 的关系、合作可能性）。source_list = existing 时填 null。",
+
+  "funding_last_stage": "One of: Seed | Series A | Series B | Series C | Series D | Series E+ | Growth | Acquired | Public | None | unknown. Nothing else, no parentheticals. Pre-seed and Angel → write Seed. Series E, F, G or later → write exactly 'Series E+'. A merger → write Acquired. If None (the company has taken no outside funding): funding_last_amount, funding_last_date and funding_total are 'n/a', and funding_source_url points to the page showing the company has taken no outside funding.",
+  "funding_last_amount": "Figure only, e.g. $50M. If stage = Acquired, the deal value. If stage = Public, IPO proceeds or 'unknown'. If stage = None, 'n/a'. 'unknown' if not found.",
+  "funding_last_date": "YYYY-MM or 'unknown'. If stage = Public, 'unknown' or the listing month. If stage = None, 'n/a'.",
+  "funding_total": "Figure only, e.g. ~$1.4B. Private rounds only; never includes an acquisition price or IPO proceeds. If stage = None, 'n/a'. 'unknown' if not found. Explanations go in notes.",
+  "funding_source_url": "URL of the primary source (company blog / press release preferred over aggregators). 'none' if unknown.",
+
+  "arr": "The MOST RECENT public figure, month/year if known else year, e.g. '$2.6B (Jun 2026)' or '$300M (2025)'. For public companies use the latest reported revenue, labeled, with its period, e.g. '$1.4B revenue (Q2 2026)' or '$1.2B revenue (FY2025)'. Keep the reporting currency ($, €, or £) exactly as the source states it; never convert. 'unknown' if nothing public.",
+  "arr_confidence": "reported | estimated | unknown. 'reported' ONLY if the page in arr_source_url is (a) the company itself (its blog, press releases, SEC filings, earnings reports, or on-record statements by its founders or executives), or (b) one of: Bloomberg, Reuters, The Information, TechCrunch, Forbes, WSJ, FT, CNBC, NYT, Axios, Fortune, Business Insider. If a secondary page is used because the original is paywalled, it must name one of those outlets as its source. Everything else — Sacra, arr.club, Getlatka, Tracxn, Crunchbase, Substack newsletters, personal blogs — is 'estimated'. This list is exhaustive.",
+  "arr_source_url": "URL of the page that states the exact figure in `arr`. Must not be a page that gives a different number. 'none' if unknown.",
+
+  "stack_signals": ["array of short strings — what their stack publicly shows; empty array if nothing found"],
+  "needs_confirmation": ["TiDB / drive9 capability claims only — things you said or implied we can do that reference material did not confirm. Company-side gaps ('no evidence of X') go in notes, not here. Empty array if none."],
+  "evidence_urls": ["array of URLs used for the company research, max 6"],
+  "notes": "English, 1 sentence, optional. Anything a human reviewer should know, e.g. which line to lead with."
+}

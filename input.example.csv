@@ -1,0 +1,4 @@
+name,website,category,source_list
+Acme Builder,https://acme-builder.example,app_building,existing
+Beta Agents,https://beta-agents.example,agent_execution,existing
+Gamma Cloud,,general,new
