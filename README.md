@@ -72,6 +72,10 @@ CLAUDE.md              instructions for Claude Code sessions that maintain this 
 - Resume is automatic. Companies already in `output.jsonl` are skipped, so running the
   same command again after a stop, a crash, or a usage-limit exit continues where it
   left off. `--limit N` runs only the first N remaining rows.
+- `python3 enrich.py --refresh proof-points --workers 3` updates only the proof-point
+  wording of existing records (fit_zh, pitch_en, evidence_urls) after the proof-point
+  rule changes; one web search per record via `update_prompt.md`, drive9-target rows
+  skipped, changes logged as `updated:` in `errors.log`. Add `--only` names to limit it.
 - Usage limits are not failures. On a hit, all workers pause until the reset time the
   CLI reports (30 minutes if it reports none), then retry the same company. After four
   waits, or on a weekly limit, the run exits cleanly; rerun it later.

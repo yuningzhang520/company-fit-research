@@ -24,6 +24,9 @@ with placeholders expanded; the script never adds instructions of its own.
   --tools "WebSearch,WebFetch,Read,Glob,Grep" --allowedTools <same> --strict-mcp-config
   --setting-sources user`, prompt on stdin. `--setting-sources user` keeps this file
   out of the research context; do not remove it.
+  `--refresh proof-points` (with `--only` names or all records) runs one web-only call
+  per existing record from `update_prompt.md` that may patch only fit_zh / pitch_en /
+  evidence_urls; drive9-target rows are skipped; changes are logged as `updated:`.
 - `export.py` — `output.jsonl` → `output.csv` (UTF-8 BOM, schema key order, rows in
   `input.csv` order).
 - `export_sheet.py` — `output.jsonl` → `report.xlsx` (README, 原有/新增 sheets,

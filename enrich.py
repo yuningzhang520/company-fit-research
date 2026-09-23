@@ -24,6 +24,7 @@ a fifth wait in one run, stops the run cleanly; rerunning resumes.
     python3 enrich.py --only "Cursor"        # re-run one company, overwrite its line
 """
 import argparse
+import copy
 import csv
 import json
 import re
@@ -43,6 +44,7 @@ OUTPUT_JSONL = ROOT / "output.jsonl"
 ERRORS_LOG = ROOT / "errors.log"
 TEMPLATE = ROOT / "prompt_template.md"
 REPAIR_TEMPLATE = ROOT / "repair_prompt.md"
+UPDATE_TEMPLATE = ROOT / "update_prompt.md"
 CONTEXT = ROOT / "context"
 SCHEMA = CONTEXT / "output_schema.json"
 
@@ -58,6 +60,12 @@ MODEL = "sonnet"
 TOOLS = "WebSearch,WebFetch,Read,Glob,Grep"
 CALL_TIMEOUT_SEC = 900      # one research call; a hung CLI must not stall the run
 REPAIR_TIMEOUT_SEC = 180    # the no-tools repair call
+REFRESH_TIMEOUT_SEC = 420   # a --refresh call: one search, maybe one fetch, a rewrite
+REFRESH_TOOLS = "WebSearch,WebFetch"
+REFRESH_FIELDS = {"proof-points": ("fit_zh", "pitch_en", "evidence_urls")}  # --refresh kind -> patchable fields
+# --refresh kind -> records to skip without a call (drive9 has no customer story beyond Kimi, a lead point)
+REFRESH_SKIP = {"proof-points": lambda rec: rec.get("fit_target") == "drive9"}
+MAX_EVIDENCE_URLS = 6
 WARMUP_SEC = 30             # first call runs alone this long so the prompt cache exists
 THROTTLE_SLEEP_SEC = 120    # server-side throttling (not the subscription limit)
 THROTTLE_MAX = 3            # short backoffs per call before treating it as a usage limit
@@ -142,6 +150,22 @@ def expand_repair_template():
     if SCHEMA_PLACEHOLDER not in text:
         sys.exit(f"placeholder {SCHEMA_PLACEHOLDER!r} not found in repair_prompt.md")
     return text.replace(SCHEMA_PLACEHOLDER, SCHEMA.read_text(encoding="utf-8"))
+
+
+def expand_update_template():
+    """Update prompt with the research prompt's product/proof-point/rules block and the schema
+    pasted in; {{company}} and {{record}} stay for later."""
+    text = UPDATE_TEMPLATE.read_text(encoding="utf-8")
+    research = TEMPLATE.read_text(encoding="utf-8")
+    start, end = research.find("# What we sell"), research.find("# Fit rubric")
+    if start == -1 or end == -1 or end <= start:
+        sys.exit("could not locate the '# What we sell' .. '# Fit rubric' block in prompt_template.md")
+    for placeholder, content in (("{{paste template: what we sell}}", research[start:end].strip()),
+                                 (SCHEMA_PLACEHOLDER, SCHEMA.read_text(encoding="utf-8"))):
+        if placeholder not in text:
+            sys.exit(f"placeholder {placeholder!r} not found in update_prompt.md")
+        text = text.replace(placeholder, content)
+    return text
 
 
 def fill_row(template, row):
@@ -255,6 +279,18 @@ def repair_cmd():
         "--output-format", "stream-json", "--verbose",
         "--model", MODEL,
         "--tools", "",               # no tools at all: a repair must not research
+        "--strict-mcp-config",
+        "--setting-sources", "user",
+    ]
+
+
+def refresh_cmd():
+    return [
+        "claude", "-p",
+        "--output-format", "stream-json", "--verbose",
+        "--model", MODEL,
+        "--tools", REFRESH_TOOLS,        # web only: no file tools, the record is in the prompt
+        "--allowedTools", REFRESH_TOOLS,
         "--strict-mcp-config",
         "--setting-sources", "user",
     ]
@@ -659,6 +695,55 @@ def research(row, prompt, repair_template, schema_keys, state):
     return None, cost, "\n\n".join(errors), None
 
 
+def refresh_record(row, record, kind, update_template, schema_keys, state):
+    """--refresh: one web-enabled call that may patch only REFRESH_FIELDS[kind] of an existing record.
+
+    Returns (record, cost, None, info) on success (record unchanged when the model returns {}),
+    or (None, cost, error_text, None). Raises UsageLimit like research().
+    """
+    fields = REFRESH_FIELDS[kind]
+    prompt = (update_template
+              .replace("{{company}}", row["name"])
+              .replace("{{record}}", json.dumps(record, ensure_ascii=False, indent=2)))
+    text, session, cost, cli_err = call(refresh_cmd(), prompt, REFRESH_TIMEOUT_SEC, state, "refresh call")
+    if cli_err:
+        return None, cost, cli_err, None
+    try:
+        patch = extract_json(text)
+    except (ValueError, json.JSONDecodeError) as e:
+        return None, cost, f"refresh output is not JSON: {e} (session {session})\n{text}", None
+    if not isinstance(patch, dict):
+        return None, cost, f"refresh output is not an object (session {session})\n{text}", None
+    info = {"attempt": 1, "normalized": [], "repaired": [], "updated": [], "no_match": False}
+    if not patch:
+        info["no_match"] = True
+        return record, cost, None, info
+    extra = sorted(set(patch) - set(fields))
+    if extra:
+        return None, cost, f"refresh touched fields it was not allowed to: {extra} (session {session})\n{text}", None
+    obj = copy.deepcopy(record)
+    obj.update(patch)
+    if isinstance(obj.get("evidence_urls"), list) and len(obj["evidence_urls"]) > MAX_EVIDENCE_URLS:
+        obj["evidence_urls"] = obj["evidence_urls"][:MAX_EVIDENCE_URLS]
+    info["normalized"] = normalize(obj)
+    try:
+        validate(obj, schema_keys, row)
+    except ValueError as e:
+        return None, cost, f"refreshed record invalid: {e} (session {session})\n--- patch ---\n{text}", None
+    if obj["fit_score"] != record["fit_score"]:
+        return None, cost, f"refresh changed fit_score (session {session})\n{text}", None
+    changed = [f for f in fields if obj.get(f) != record.get(f)]
+    if not changed:
+        info["no_match"] = True
+        return record, cost, None, info
+    before = "\n".join(f"{f}: {json.dumps(record.get(f), ensure_ascii=False)}" for f in changed)
+    after = "\n".join(f"{f}: {json.dumps(obj.get(f), ensure_ascii=False)}" for f in changed)
+    log_error(row["name"], f"(session {session})\n--- before ---\n{before}\n--- after ---\n{after}",
+              marker=f"updated: {kind} " + ",".join(changed))
+    info["updated"] = changed
+    return obj, cost, None, info
+
+
 # ---------------------------------------------------------------- outputs
 
 def append_record(obj):
@@ -703,6 +788,10 @@ def status_tags(info, warns):
         tags.append("repaired: " + ",".join(info["repaired"]))
     if info["attempt"] > 1:
         tags.append("rerun")
+    if info.get("updated"):
+        tags.append("updated: " + ",".join(info["updated"]))
+    if info.get("no_match"):
+        tags.append("no match")
     if warns:
         tags.append("WARN: " + "; ".join(warns))
     return ("  " + "  ".join(tags)) if tags else ""
@@ -713,13 +802,19 @@ def status_tags(info, warns):
 class Ctx:
     """Read-only inputs shared by workers, plus the records list for --only (replace mode)."""
 
-    def __init__(self, template, repair_template, schema_keys, total, replace=False, records=None):
+    def __init__(self, template, repair_template, schema_keys, total, replace=False, records=None,
+                 refresh=None, update_template=None):
         self.template = template
         self.repair_template = repair_template
         self.schema_keys = schema_keys
         self.total = total
         self.replace = replace
         self.records = records or []
+        self.refresh = refresh                  # None, or a REFRESH_FIELDS kind
+        self.update_template = update_template
+
+    def record_for(self, row):
+        return next((r for r in self.records if r.get("company") == row["name"]), None)
 
     def prompt_for(self, row):
         return fill_row(self.template, row)
@@ -780,7 +875,12 @@ def worker(wid, state, todo, ctx):
         name = row["name"]
         t0 = time.monotonic()
         try:
-            obj, cost, err, info = research(row, ctx.prompt_for(row), ctx.repair_template, ctx.schema_keys, state)
+            if ctx.refresh:
+                with state.lock:
+                    current = ctx.record_for(row)
+                obj, cost, err, info = refresh_record(row, current, ctx.refresh, ctx.update_template, ctx.schema_keys, state)
+            else:
+                obj, cost, err, info = research(row, ctx.prompt_for(row), ctx.repair_template, ctx.schema_keys, state)
         except UsageLimit as hit:
             with state.lock:
                 todo.appendleft(row)
@@ -801,7 +901,8 @@ def worker(wid, state, todo, ctx):
             continue
         with state.lock:
             if ctx.replace:
-                ctx.records = replace_record(ctx.records, obj)
+                if not info.get("no_match"):
+                    ctx.records = replace_record(ctx.records, obj)
             else:
                 append_record(obj)
             state.ok += 1
@@ -844,8 +945,11 @@ def run_pool(rows_todo, ctx, n_workers, state):
 def main():
     ap = argparse.ArgumentParser(description="Research companies via headless Claude Code, one call each.")
     ap.add_argument("--limit", type=int, metavar="N", help="process only the first N remaining rows")
-    ap.add_argument("--only", metavar="NAME", help="re-run a single company (exact name from input.csv), overwriting its line")
+    ap.add_argument("--only", metavar="NAME", action="append",
+                    help="re-run this company (exact name from input.csv), overwriting its line; repeatable")
     ap.add_argument("--workers", type=int, default=1, metavar="N", help="parallel research calls (default 1)")
+    ap.add_argument("--refresh", choices=sorted(REFRESH_FIELDS), metavar="KIND",
+                    help="update only some fields of existing records (kinds: " + ", ".join(sorted(REFRESH_FIELDS)) + ")")
     args = ap.parse_args()
 
     if not shutil.which("claude"):
@@ -856,21 +960,42 @@ def main():
     records = load_existing()
     done = {r.get("company") for r in records}
 
-    if args.only:
-        todo = [r for r in rows if r["name"] == args.only]
-        if not todo:
-            sys.exit(f"--only: {args.only!r} not found in input.csv")
-        n_workers = 1
+    if args.refresh:
+        wanted = set(args.only) if args.only else None
+        todo = [r for r in rows if r["name"] in done and (wanted is None or r["name"] in wanted)]
+        if wanted:
+            missing = sorted(wanted - {r["name"] for r in todo})
+            if missing:
+                sys.exit(f"--refresh needs an existing record for each --only name; not in output.jsonl: {missing}")
+        skip = REFRESH_SKIP.get(args.refresh)
+        if skip:
+            by_name = {r.get("company"): r for r in records}
+            before = len(todo)
+            todo = [r for r in todo if not skip(by_name[r["name"]])]
+            if before != len(todo):
+                print(f"skipping {before - len(todo)} record(s) that a '{args.refresh}' refresh cannot improve", flush=True)
+        if args.limit is not None:
+            todo = todo[:max(args.limit, 0)]
+        n_workers = max(1, args.workers)
+    elif args.only:
+        wanted = set(args.only)
+        todo = [r for r in rows if r["name"] in wanted]
+        missing = sorted(wanted - {r["name"] for r in todo})
+        if missing:
+            sys.exit(f"--only: not found in input.csv: {missing}")
+        n_workers = max(1, args.workers) if len(todo) > 1 else 1
     else:
         todo = [r for r in rows if r["name"] not in done]
         if args.limit is not None:
             todo = todo[:max(args.limit, 0)]
         n_workers = max(1, args.workers)
 
-    print(f"{len(rows)} rows in input.csv, {len(done)} already in output.jsonl, {len(todo)} to run, "
+    mode = f"refresh {args.refresh}" if args.refresh else ("re-run" if args.only else "run")
+    print(f"{len(rows)} rows in input.csv, {len(done)} already in output.jsonl, {len(todo)} to {mode}, "
           f"{min(n_workers, max(len(todo), 1))} worker(s)", flush=True)
     ctx = Ctx(expand_template(), expand_repair_template(), schema_keys, len(todo),
-              replace=bool(args.only), records=records)
+              replace=bool(args.only or args.refresh), records=records,
+              refresh=args.refresh, update_template=expand_update_template() if args.refresh else None)
     state = RunState()
 
     t_start = time.monotonic()
