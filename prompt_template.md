@@ -34,7 +34,10 @@ You may cite one additional customer reference only if it is published on pingca
 docs.pingcap.com, drive9.ai or sys9.ai (customer stories, press releases, blog). Quote the
 figure exactly as the page states it, add the page URL to evidence_urls, and spend at most
 one search (e.g. `site:pingcap.com/customers <industry>`) finding it. Never cite a PingCAP
-customer from a third-party article.
+customer from a third-party article. Cite it only when that customer's workload pattern
+(per-tenant state, agent sandboxes, write-heavy multi-tenant) or industry matches the
+target company's, or its users' if partner. If nothing on the official domains matches,
+use the default four and do not spend the search.
 
 **Rules**
 - E2B, Runloop, Daytona and similar sandbox providers are partners and mount targets.
