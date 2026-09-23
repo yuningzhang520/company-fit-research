@@ -115,10 +115,11 @@ already exist and only their prose needs to follow. It never re-researches a com
   `--only`, or of everything.
 - **What it does:** one web-only call per existing record, built from
   `refresh_prompt.md`, which may return a patch for a fixed set of fields. For the
-  `proof-points` kind that set is `fit_zh`, `pitch_en` and `evidence_urls`, and
-  drive9-target rows are skipped because the only drive9 customer story is already a
-  lead proof point. A patch that touches any other field is rejected and the record is
-  left as it was. Rows the model finds nothing for come back as `no match`, untouched.
+  `proof-points` kind that set is `fit_zh`, `pitch_en` and `evidence_urls`. drive9-target
+  rows are skipped because the only drive9 customer story is already a lead proof point,
+  and weak rows are skipped because a proof point in a weak row is outside the rule's
+  intent. A patch that touches any other field is rejected and the record is left as it
+  was. Rows the model finds nothing for come back as `no match`, untouched.
 - **What never moves:** `fit_score`, and every fact field (funding, ARR, stack signals).
   The refresh rewrites prose around a new citation; it does not re-verify facts.
 - **Cost:** about $0.13 of notional usage and 15 to 120 seconds per row, against about
@@ -129,7 +130,8 @@ already exist and only their prose needs to follow. It never re-researches a com
   python3 enrich.py --refresh proof-points --only "Writer" --only "Lindy"
   ```
   Changed rows are logged in `errors.log` under `refreshed: <kind> <fields>` with the
-  before and after text. In the first batch, 12 of 59 eligible rows changed.
+  before and after text. In the first batch, 12 of 59 rows changed; 3 weak rows were then
+  reverted and weak rows excluded.
 - **Adding a kind:** add an entry to `REFRESH_FIELDS` (and to `REFRESH_SKIP` if some
   rows cannot benefit) in `enrich.py`; `refresh_prompt.md` is written for proof points
   today and would need its own instructions for a new kind.

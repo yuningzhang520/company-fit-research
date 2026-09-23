@@ -26,7 +26,7 @@ with placeholders expanded; the script never adds instructions of its own.
   out of the research context; do not remove it.
   `--refresh proof-points` (with `--only` names or all records) runs one web-only call
   per existing record from `refresh_prompt.md` that may patch only fit_zh / pitch_en /
-  evidence_urls; fit_score never moves; drive9-target rows are skipped; changes are
+  evidence_urls; fit_score never moves; drive9 and weak rows are skipped; changes are
   logged as `refreshed:`.
 - `export.py` — `output.jsonl` → `output.csv` (UTF-8 BOM, schema key order, rows in
   `input.csv` order).

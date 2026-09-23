@@ -64,8 +64,9 @@ REPAIR_TIMEOUT_SEC = 180    # the no-tools repair call
 REFRESH_TIMEOUT_SEC = 420   # a --refresh call: one search, maybe one fetch, a rewrite
 REFRESH_TOOLS = "WebSearch,WebFetch"
 REFRESH_FIELDS = {"proof-points": ("fit_zh", "pitch_en", "evidence_urls")}  # --refresh kind -> patchable fields
-# --refresh kind -> records to skip without a call (drive9 has no customer story beyond Kimi, a lead point)
-REFRESH_SKIP = {"proof-points": lambda rec: rec.get("fit_target") == "drive9"}
+# --refresh kind -> records to skip without a call: drive9 has no customer story beyond Kimi (a lead
+# point), and a weak row citing a proof point is outside the rule's intent
+REFRESH_SKIP = {"proof-points": lambda rec: rec.get("fit_target") in ("drive9", "weak")}
 MAX_EVIDENCE_URLS = 6
 WARMUP_SEC = 30             # first call runs alone this long so the prompt cache exists
 THROTTLE_SLEEP_SEC = 120    # server-side throttling (not the subscription limit)
